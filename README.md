@@ -260,3 +260,5 @@ MIT License - See LICENSE file for details.
 ---
 
 **DID++ v2.0** - Fully Decentralized Biometric Identity
+# DID_Ver3
+# DID_Ver3

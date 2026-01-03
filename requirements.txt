@@ -11,18 +11,18 @@ python-dotenv>=1.0.0
 cryptography>=41.0.0
 
 # ============ ML/AI - Biometric Processing ============
-# Face Recognition (ArcFace via InsightFace)
-insightface>=0.7.3
-
-# ONNX Runtime - USE GPU VERSION FOR CUDA SUPPORT
-# Uncomment the appropriate line for your system:
-# onnxruntime>=1.20.0          # CPU only
-onnxruntime-gpu>=1.20.0        # NVIDIA GPU with CUDA 12
+# Face Recognition (FaceNet via facenet-pytorch)
+facenet-pytorch>=2.5.3
 
 # Voice Recognition (ECAPA-TDNN via SpeechBrain)
 speechbrain>=1.0.0
-torch>=2.0.0
-torchaudio>=2.0.0
+ruamel.yaml==0.18.6  # Pinned for hyperpyyaml compatibility (0.19.x has max_depth issue)
+
+# PyTorch - pinned for facenet-pytorch compatibility
+# For GPU: pip install torch==2.2.2+cu121 torchvision==0.17.2+cu121 torchaudio==2.2.2+cu121 --index-url https://download.pytorch.org/whl/cu121
+torch>=2.2.0,<2.3.0
+torchvision>=0.17.0,<0.18.0
+torchaudio>=2.2.0,<2.3.0
 
 # Image/Audio Processing
 opencv-python>=4.8.0

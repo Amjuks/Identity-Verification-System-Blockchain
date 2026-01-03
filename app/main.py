@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from app.config import config
-from app.routes import registration, verification, history
+from app.routes import registration, verification, history, alias
 
 
 # Initialize FastAPI app
@@ -58,6 +58,7 @@ app.add_middleware(
 app.include_router(registration.router, prefix="/api", tags=["Registration"])
 app.include_router(verification.router, prefix="/api", tags=["Verification"])
 app.include_router(history.router, prefix="/api", tags=["History"])
+app.include_router(alias.router, prefix="/api/alias", tags=["Alias Management"])
 
 
 @app.on_event("startup")

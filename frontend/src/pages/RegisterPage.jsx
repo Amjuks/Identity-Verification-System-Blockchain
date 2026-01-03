@@ -175,7 +175,7 @@ function RegisterPage() {
                             <div className="file-upload-text">
                                 {files.face ? files.face.name : 'Click to upload face photo'}
                             </div>
-                            <div className="file-upload-hint">JPEG only, max 10MB • Extracts 512-D ArcFace embedding</div>
+                            <div className="file-upload-hint">JPEG only, max 10MB • Extracts 512-D FaceNet embedding</div>
                         </div>
                         <div className="capture-options">
                             <button
@@ -271,11 +271,32 @@ function RegisterPage() {
                         {result.success ? (
                             <div>
                                 <p style={{ fontWeight: 600, marginBottom: '1rem', fontSize: '1.25rem' }}>✓ Registration Successful!</p>
-                                
+
+                                {/* Short Code - Prominently displayed */}
+                                {result.data.short_code && (
+                                    <div style={{ marginBottom: '1.5rem', padding: '1.5rem', background: 'linear-gradient(135deg, rgba(56, 239, 125, 0.2) 0%, rgba(102, 126, 234, 0.2) 100%)', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
+                                        <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginBottom: '0.5rem' }}>YOUR SHORT CODE (Easy to Remember!)</div>
+                                        <div style={{
+                                            fontSize: '2.5rem',
+                                            fontWeight: 700,
+                                            fontFamily: 'var(--font-mono)',
+                                            letterSpacing: '0.3rem',
+                                            background: 'linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%)',
+                                            WebkitBackgroundClip: 'text',
+                                            WebkitTextFillColor: 'transparent'
+                                        }}>
+                                            {result.data.short_code.toUpperCase()}
+                                        </div>
+                                        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
+                                            Use this instead of your long DID for verification!
+                                        </div>
+                                    </div>
+                                )}
+
                                 {/* DID */}
                                 <div style={{ marginBottom: '1rem' }}>
-                                    <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginBottom: '0.25rem' }}>DECENTRALIZED IDENTIFIER (DID)</div>
-                                    <div className="did-display">{result.data.did}</div>
+                                    <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginBottom: '0.25rem' }}>FULL DECENTRALIZED IDENTIFIER (DID)</div>
+                                    <div className="did-display" style={{ fontSize: '0.7rem' }}>{result.data.did}</div>
                                 </div>
 
                                 {/* IPFS CID */}
@@ -284,9 +305,9 @@ function RegisterPage() {
                                     <div className="did-display" style={{ background: 'rgba(118, 75, 162, 0.2)' }}>
                                         {result.data.ipfs_cid}
                                     </div>
-                                    <a 
-                                        href={result.data.ipfs_gateway_url} 
-                                        target="_blank" 
+                                    <a
+                                        href={result.data.ipfs_gateway_url}
+                                        target="_blank"
                                         rel="noopener noreferrer"
                                         style={{ fontSize: '0.75rem', color: 'var(--info)' }}
                                     >

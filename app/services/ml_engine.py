@@ -1,11 +1,15 @@
 """
 DID++ ML Engine
 Multi-modal biometric processing for face, voice, and document embeddings.
-Uses ArcFace for face recognition and SpeechBrain ECAPA-TDNN for speaker verification.
+Uses FaceNet (InceptionResnetV1) for face recognition and SpeechBrain ECAPA-TDNN for speaker verification.
 """
 
-import io
 import os
+# Fix for Windows symlink privilege issue with SpeechBrain
+# Must be set BEFORE speechbrain is imported anywhere
+os.environ['SPEECHBRAIN_LOCAL_STRATEGY'] = 'copy'
+
+import io
 import tempfile
 import numpy as np
 from typing import Tuple, Optional
@@ -14,99 +18,95 @@ import librosa
 import easyocr
 
 
-def get_onnx_providers():
-    """
-    Get available ONNX Runtime execution providers.
-    Prioritizes GPU (CUDA) if available.
-    """
-    try:
-        import onnxruntime as ort
-        available = ort.get_available_providers()
-        
-        # Prefer GPU providers
-        preferred_order = [
-            'CUDAExecutionProvider',
-            'TensorrtExecutionProvider', 
-            'CoreMLExecutionProvider',
-            'CPUExecutionProvider'
-        ]
-        
-        providers = []
-        for p in preferred_order:
-            if p in available:
-                providers.append(p)
-        
-        if not providers:
-            providers = ['CPUExecutionProvider']
-        
-        print(f"ONNX Providers: {providers}")
-        return providers
-    except Exception as e:
-        print(f"Error getting ONNX providers: {e}")
-        return ['CPUExecutionProvider']
-
-
 class FaceProcessor:
     """
-    Face embedding extraction using ArcFace (via InsightFace).
+    Face embedding extraction using FaceNet (via facenet-pytorch).
     Produces 512-D embeddings that are highly discriminative.
+    Uses MTCNN for face detection and InceptionResnetV1 pretrained on VGGFace2.
     """
     
     def __init__(self, output_dim: int = 512):
         self.output_dim = output_dim
-        self.face_analyzer = None
+        self.mtcnn = None
+        self.resnet = None
         self._initialized = False
-        self._providers = None
+        self._device = None
     
-    def _get_analyzer(self):
-        """Lazy initialization of InsightFace analyzer with GPU support."""
+    def _get_models(self):
+        """Lazy initialization of FaceNet models with GPU support."""
         if not self._initialized:
             try:
-                from insightface.app import FaceAnalysis
+                import torch
+                from facenet_pytorch import MTCNN, InceptionResnetV1
                 
-                # Get available providers (GPU if available)
-                self._providers = get_onnx_providers()
+                # Diagnostic logging for GPU availability
+                cuda_available = torch.cuda.is_available()
+                print(f"PyTorch version: {torch.__version__}")
+                print(f"CUDA available: {cuda_available}")
+                if cuda_available:
+                    print(f"CUDA version: {torch.version.cuda}")
+                    print(f"GPU device: {torch.cuda.get_device_name(0)}")
                 
-                # Initialize with ArcFace model
-                self.face_analyzer = FaceAnalysis(
-                    name='buffalo_l',  # Uses ArcFace model
-                    providers=self._providers
+                # Use GPU if available
+                self._device = torch.device('cuda' if cuda_available else 'cpu')
+                
+                # Initialize MTCNN for face detection
+                # Returns face tensors ready for the recognition model
+                self.mtcnn = MTCNN(
+                    image_size=160,
+                    margin=20,
+                    min_face_size=20,
+                    thresholds=[0.6, 0.7, 0.7],
+                    factor=0.709,
+                    post_process=True,
+                    device=self._device,
+                    keep_all=False  # Only keep the largest face
                 )
-                # Use ctx_id=0 for GPU, -1 for CPU
-                ctx_id = 0 if 'CUDAExecutionProvider' in self._providers else -1
-                self.face_analyzer.prepare(ctx_id=ctx_id, det_size=(640, 640))
+                
+                # Initialize InceptionResnetV1 for face embedding
+                self.resnet = InceptionResnetV1(
+                    pretrained='vggface2',
+                    classify=False,
+                    device=self._device
+                ).eval()
+                
+                # Ensure model is on correct device
+                self.resnet = self.resnet.to(self._device)
+                
                 self._initialized = True
-                print(f"InsightFace initialized with ctx_id={ctx_id}, providers={self._providers}")
+                print(f"FaceNet initialized on device: {self._device}")
             except Exception as e:
-                print(f"Failed to initialize InsightFace: {e}")
+                print(f"Failed to initialize FaceNet: {e}")
                 import traceback
                 traceback.print_exc()
                 self._initialized = True  # Don't retry on failure
-        return self.face_analyzer
+        return self.mtcnn, self.resnet
     
     def preprocess_image(self, image: np.ndarray) -> np.ndarray:
         """
         Preprocess image for better face detection.
         - Resize if too small
-        - Enhance contrast
         - Convert color space if needed
         """
         if image is None:
             return None
         
-        # Ensure image is in BGR format (OpenCV default)
+        # Ensure image is in RGB format (MTCNN expects RGB)
         if len(image.shape) == 2:
-            # Grayscale to BGR
-            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+            # Grayscale to RGB
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
         elif image.shape[2] == 4:
-            # RGBA to BGR
-            image = cv2.cvtColor(image, cv2.COLOR_RGBA2BGR)
+            # RGBA to RGB
+            image = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
+        elif image.shape[2] == 3:
+            # BGR to RGB (OpenCV loads as BGR)
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
         # Get dimensions
         h, w = image.shape[:2]
         
         # Resize if image is too small (face detection needs reasonable size)
-        min_size = 640
+        min_size = 160
         if h < min_size or w < min_size:
             scale = max(min_size / h, min_size / w)
             new_w = int(w * scale)
@@ -114,17 +114,11 @@ class FaceProcessor:
             image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
             print(f"Resized image from ({w}, {h}) to ({new_w}, {new_h})")
         
-        # Optional: enhance contrast using CLAHE
-        # lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-        # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        # lab[:, :, 0] = clahe.apply(lab[:, :, 0])
-        # image = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
-        
         return image
     
     def process(self, image_bytes: bytes) -> Optional[np.ndarray]:
         """
-        Process face image and return 512-D ArcFace embedding.
+        Process face image and return 512-D FaceNet embedding.
         
         Args:
             image_bytes: Raw image bytes (JPEG)
@@ -133,6 +127,9 @@ class FaceProcessor:
             512-D float32 embedding or None if face not detected
         """
         try:
+            import torch
+            from PIL import Image
+            
             # Decode image
             nparr = np.frombuffer(image_bytes, np.uint8)
             image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -150,32 +147,32 @@ class FaceProcessor:
                 print("Image preprocessing failed")
                 return None
             
-            # Get analyzer
-            analyzer = self._get_analyzer()
-            if analyzer is None:
-                print("Face analyzer not initialized")
+            # Get models
+            mtcnn, resnet = self._get_models()
+            if mtcnn is None or resnet is None:
+                print("FaceNet models not initialized")
                 return None
             
-            # Detect faces and get embeddings
-            faces = analyzer.get(image)
+            # Convert to PIL Image (MTCNN expects PIL Image or numpy array)
+            pil_image = Image.fromarray(image)
             
-            if not faces or len(faces) == 0:
+            # Detect face and get aligned face tensor
+            face_tensor = mtcnn(pil_image)
+            
+            if face_tensor is None:
                 print(f"No face detected in image (size: {image.shape})")
-                # Try with different detection sizes
-                for det_size in [(320, 320), (480, 480), (800, 800)]:
-                    analyzer.prepare(ctx_id=0 if 'CUDAExecutionProvider' in (self._providers or []) else -1, 
-                                     det_size=det_size)
-                    faces = analyzer.get(image)
-                    if faces and len(faces) > 0:
-                        print(f"Face detected with det_size={det_size}")
-                        break
-                
-                if not faces or len(faces) == 0:
-                    print("No face detected after trying multiple detection sizes")
-                    return None
+                return None
             
-            # Get embedding from the first (largest) face
-            embedding = faces[0].embedding
+            # Ensure tensor is on correct device and has batch dimension
+            if face_tensor.dim() == 3:
+                face_tensor = face_tensor.unsqueeze(0)
+            face_tensor = face_tensor.to(self._device)
+            
+            # Get embedding
+            with torch.no_grad():
+                embedding = resnet(face_tensor)
+                embedding = embedding.squeeze().cpu().numpy()
+            
             print(f"Face detected! Embedding shape: {embedding.shape}")
             
             # Ensure it's float32 and normalized
@@ -221,12 +218,16 @@ class VoiceProcessor:
                     pass
                 
                 from speechbrain.inference import EncoderClassifier
+                # Import LocalStrategy for Windows symlink fix
+                from speechbrain.utils.fetching import LocalStrategy
                 
                 # Use ECAPA-TDNN model for speaker embedding
+                # Use COPY strategy to avoid Windows symlink privilege issues
                 self.encoder = EncoderClassifier.from_hparams(
                     source="speechbrain/spkrec-ecapa-voxceleb",
                     savedir="data/speechbrain_models/spkrec-ecapa-voxceleb",
-                    run_opts={"device": "cuda" if torch.cuda.is_available() else "cpu"}
+                    run_opts={"device": "cuda" if torch.cuda.is_available() else "cpu"},
+                    local_strategy=LocalStrategy.COPY
                 )
                 self._initialized = True
                 print(f"SpeechBrain ECAPA-TDNN model loaded (device: {'cuda' if torch.cuda.is_available() else 'cpu'})")
@@ -235,11 +236,13 @@ class VoiceProcessor:
                 try:
                     import torch
                     from speechbrain.pretrained import EncoderClassifier
+                    from speechbrain.utils.fetching import LocalStrategy
                     
                     self.encoder = EncoderClassifier.from_hparams(
                         source="speechbrain/spkrec-ecapa-voxceleb",
                         savedir="data/speechbrain_models/spkrec-ecapa-voxceleb",
-                        run_opts={"device": "cuda" if torch.cuda.is_available() else "cpu"}
+                        run_opts={"device": "cuda" if torch.cuda.is_available() else "cpu"},
+                        local_strategy=LocalStrategy.COPY
                     )
                     self._initialized = True
                     print("SpeechBrain loaded via pretrained import path")
@@ -259,6 +262,12 @@ class VoiceProcessor:
         """
         Process voice audio and return 192-D speaker embedding.
         
+        Includes enhanced preprocessing for better accuracy:
+        - Audio normalization
+        - Noise reduction
+        - Voice activity detection (trimming silence)
+        - Minimum 3-second requirement for better embeddings
+        
         Args:
             audio_bytes: Raw audio bytes (WAV/WebM format)
             
@@ -274,10 +283,41 @@ class VoiceProcessor:
                 print("Empty audio")
                 return None
             
-            # Minimum 1 second of audio
-            if len(y) < self.sample_rate:
-                # Pad with silence if too short
-                y = np.pad(y, (0, self.sample_rate - len(y)))
+            # ============ Enhanced Preprocessing ============
+            
+            # 1. Normalize audio to consistent volume level
+            max_val = np.max(np.abs(y))
+            if max_val > 0:
+                y = y / max_val * 0.95  # Normalize to 95% of max
+            
+            # 2. Remove DC offset
+            y = y - np.mean(y)
+            
+            # 3. Trim silence from beginning and end (voice activity detection)
+            # Use energy-based trimming
+            y_trimmed, _ = librosa.effects.trim(y, top_db=25)
+            
+            # Only use trimmed if it preserves reasonable amount of audio
+            if len(y_trimmed) > self.sample_rate * 0.5:  # At least 0.5 second
+                y = y_trimmed
+                print(f"Audio trimmed: {len(y)/self.sample_rate:.2f}s of speech detected")
+            
+            # 4. Apply pre-emphasis filter to boost high frequencies (clearer speech)
+            pre_emphasis = 0.97
+            y = np.append(y[0], y[1:] - pre_emphasis * y[:-1])
+            
+            # 5. Minimum 3 seconds for reliable speaker embedding
+            min_duration = 3 * self.sample_rate
+            if len(y) < min_duration:
+                # Repeat audio to reach minimum duration (better than padding with silence)
+                repeats = int(np.ceil(min_duration / len(y)))
+                y = np.tile(y, repeats)[:min_duration]
+                print(f"Audio repeated to reach {min_duration/self.sample_rate:.1f}s minimum")
+            
+            # Re-normalize after preprocessing
+            max_val = np.max(np.abs(y))
+            if max_val > 0:
+                y = y / max_val * 0.95
             
             # Get encoder
             encoder = self._get_encoder()
@@ -288,13 +328,18 @@ class VoiceProcessor:
             
             import torch
             
+            # Move tensor to same device as model
+            device = next(encoder.mods.parameters()).device
+            
             # Convert to tensor (SpeechBrain expects [batch, time])
-            audio_tensor = torch.tensor(y).unsqueeze(0).float()
+            audio_tensor = torch.tensor(y).unsqueeze(0).float().to(device)
             
             # Get embedding
             with torch.no_grad():
                 embedding = encoder.encode_batch(audio_tensor)
                 embedding = embedding.squeeze().cpu().numpy()
+            
+            print(f"Voice embedding extracted, shape: {embedding.shape}")
             
             # Ensure it's float32 and normalized
             embedding = embedding.astype(np.float32)
@@ -423,7 +468,7 @@ class DocumentProcessor:
         # Extract text
         text = self.extract_text(image_bytes)
         
-        # Extract face from document using ArcFace
+        # Extract face from document using FaceNet
         face_embedding = self.face_processor.process(image_bytes)
         
         # Create text embedding
@@ -454,7 +499,7 @@ class MLEngine:
         self.document_processor = DocumentProcessor()
     
     def process_face(self, image_bytes: bytes) -> Optional[np.ndarray]:
-        """Process face image and return 512-D ArcFace embedding."""
+        """Process face image and return 512-D FaceNet embedding."""
         return self.face_processor.process(image_bytes)
     
     def process_voice(self, audio_bytes: bytes) -> Optional[np.ndarray]:

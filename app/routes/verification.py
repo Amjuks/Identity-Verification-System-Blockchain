@@ -23,6 +23,7 @@ from app.services.encryption import encryption_service, compute_sha256_bytes
 from app.services.ml_engine import ml_engine
 from app.services.blockchain import blockchain_service
 from app.services.ipfs import ipfs_service
+from app.services.alias import alias_service
 
 
 router = APIRouter()
@@ -264,7 +265,7 @@ async def fetch_and_decrypt_metadata(did: str) -> Dict[str, Any]:
 
 @router.post("/verify", response_model=VerificationResponse)
 async def verify_identity(
-    did: str = Form(..., description="DID to verify against"),
+    did: str = Form(..., description="DID, short code, or alias to verify against"),
     face: UploadFile = File(..., description="Live face image (JPEG)"),
     voice: UploadFile = File(..., description="Live voice sample (WAV)"),
     id_doc: UploadFile = File(None, description="Live ID document image (JPEG) - optional")
@@ -272,12 +273,18 @@ async def verify_identity(
     """
     Verify identity using decentralized storage.
     
+    Accepts:
+    - Full DID (did:eth:sepolia:...)
+    - Short code (8 characters)
+    - Custom alias
+    
     Verification Flow:
-    1. Fetch metadata CID from blockchain
-    2. Download encrypted metadata from IPFS
-    3. Decrypt embeddings in-memory (never touches disk)
-    4. Compare live biometrics against stored embeddings
-    5. Log verification proof on blockchain
+    1. Resolve identifier to full DID
+    2. Fetch metadata CID from blockchain
+    3. Download encrypted metadata from IPFS
+    4. Decrypt embeddings in-memory (never touches disk)
+    5. Compare live biometrics against stored embeddings
+    6. Log verification proof on blockchain
     
     No local database is accessed - everything comes from IPFS + blockchain.
     
@@ -286,6 +293,20 @@ async def verify_identity(
     - Confidence level
     - Blockchain transaction hash (for successful verifications)
     """
+    
+    # ============ Step 0: Resolve Identifier ============
+    
+    # Try to resolve if it's a short code or alias
+    resolved_did = alias_service.resolve(did)
+    
+    if resolved_did:
+        did = resolved_did
+    # If not resolved and doesn't look like a DID, it might be unregistered
+    elif not did.startswith("did:"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Identifier not found: {did}. Please use your full DID, short code, or registered alias."
+        )
     
     # Validate file types
     validate_file(face, ALLOWED_IMAGE_TYPES, "face")
@@ -444,16 +465,22 @@ async def verify_identity(
     )
 
 
-@router.get("/lookup/{did}")
-async def lookup_did(did: str):
+@router.get("/lookup/{identifier}")
+async def lookup_did(identifier: str):
     """
     Look up a DID on the blockchain.
+    
+    Accepts:
+    - Full DID (did:eth:sepolia:...)
+    - Short code (8 characters)
+    - Custom alias
     
     Returns the DID record including:
     - IPFS CID
     - Identity hash
     - Registration timestamp
     - Active status
+    - Short code and aliases
     """
     
     if not blockchain_service.is_configured():
@@ -461,6 +488,17 @@ async def lookup_did(did: str):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Blockchain service not configured"
         )
+    
+    # Resolve identifier to DID
+    did = alias_service.resolve(identifier)
+    if not did:
+        if identifier.startswith("did:"):
+            did = identifier
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Identifier not found: {identifier}"
+            )
     
     # Check if DID exists
     exists, active = blockchain_service.is_did_active(did)
@@ -480,8 +518,13 @@ async def lookup_did(did: str):
             detail=f"Failed to fetch DID record: {error}"
         )
     
+    # Get identifiers (short code and aliases)
+    identifiers = alias_service.get_identifiers(did)
+    
     return {
         "did": did,
+        "short_code": identifiers['short_code'],
+        "aliases": identifiers['aliases'],
         "exists": exists,
         "active": active,
         "metadata_cid": record['metadata_cid'],

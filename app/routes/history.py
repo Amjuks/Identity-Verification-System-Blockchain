@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from app.config import config
 from app.services.blockchain import blockchain_service
 from app.services.ipfs import ipfs_service
+from app.services.alias import alias_service
 
 
 router = APIRouter()
@@ -73,10 +74,15 @@ def format_timestamp(ts: int) -> str:
         return str(ts)
 
 
-@router.get("/user/{did}", response_model=UserHistoryResponse)
-async def get_user_history(did: str):
+@router.get("/user/{identifier}", response_model=UserHistoryResponse)
+async def get_user_history(identifier: str):
     """
     Get user identity history from blockchain.
+    
+    Accepts:
+    - Full DID (did:eth:sepolia:...)
+    - Short code (8 characters)
+    - Custom alias
     
     Reconstructs the full timeline by querying blockchain event logs:
     - DIDRegistered events for registration
@@ -85,7 +91,7 @@ async def get_user_history(did: str):
     No database is queried - all data comes from the blockchain.
     
     Args:
-        did: Decentralized Identifier to query
+        identifier: DID, short code, or alias to query
     """
     
     if not blockchain_service.is_configured():
@@ -93,6 +99,17 @@ async def get_user_history(did: str):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Blockchain service not configured"
         )
+    
+    # Resolve identifier to DID
+    did = alias_service.resolve(identifier)
+    if not did:
+        if identifier.startswith("did:"):
+            did = identifier
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Identifier not found: {identifier}"
+            )
     
     # Check if DID exists
     exists, active = blockchain_service.is_did_active(did)
@@ -163,10 +180,15 @@ async def get_user_history(did: str):
     )
 
 
-@router.get("/user/{did}/stats", response_model=StatsResponse)
-async def get_user_stats(did: str):
+@router.get("/user/{identifier}/stats", response_model=StatsResponse)
+async def get_user_stats(identifier: str):
     """
     Get verification statistics for a DID.
+    
+    Accepts:
+    - Full DID (did:eth:sepolia:...)
+    - Short code (8 characters)
+    - Custom alias
     
     Queries blockchain for verification events and computes:
     - Total verifications
@@ -175,7 +197,7 @@ async def get_user_stats(did: str):
     - Last verification timestamp
     
     Args:
-        did: Decentralized Identifier to query
+        identifier: DID, short code, or alias to query
     """
     
     if not blockchain_service.is_configured():
@@ -183,6 +205,17 @@ async def get_user_stats(did: str):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Blockchain service not configured"
         )
+    
+    # Resolve identifier to DID
+    did = alias_service.resolve(identifier)
+    if not did:
+        if identifier.startswith("did:"):
+            did = identifier
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Identifier not found: {identifier}"
+            )
     
     # Check if DID exists
     exists, _ = blockchain_service.is_did_active(did)
@@ -222,16 +255,21 @@ async def get_user_stats(did: str):
     )
 
 
-@router.get("/user/{did}/verifications")
+@router.get("/user/{identifier}/verifications")
 async def get_verifications(
-    did: str,
+    identifier: str,
     limit: int = Query(default=10, ge=1, le=100)
 ):
     """
     Get recent verification records for a DID.
     
+    Accepts:
+    - Full DID (did:eth:sepolia:...)
+    - Short code (8 characters)
+    - Custom alias
+    
     Args:
-        did: Decentralized Identifier to query
+        identifier: DID, short code, or alias to query
         limit: Maximum number of records to return (1-100)
     """
     
@@ -240,6 +278,17 @@ async def get_verifications(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Blockchain service not configured"
         )
+    
+    # Resolve identifier to DID
+    did = alias_service.resolve(identifier)
+    if not did:
+        if identifier.startswith("did:"):
+            did = identifier
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Identifier not found: {identifier}"
+            )
     
     # Check if DID exists
     exists, _ = blockchain_service.is_did_active(did)

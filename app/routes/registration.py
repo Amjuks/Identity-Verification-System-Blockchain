@@ -24,6 +24,7 @@ from app.services.encryption import encryption_service, compute_sha256, compute_
 from app.services.ml_engine import ml_engine
 from app.services.blockchain import blockchain_service
 from app.services.ipfs import ipfs_service, create_ipfs_metadata
+from app.services.alias import alias_service
 
 
 router = APIRouter()
@@ -51,6 +52,7 @@ class RegistrationResponse(BaseModel):
     """Registration response model."""
     success: bool
     did: str
+    short_code: str  # User-friendly 8-char code
     user_id: str
     ipfs_cid: str
     ipfs_gateway_url: str
@@ -338,16 +340,22 @@ async def register_user(
         encrypted_size=encrypted_size
     )
     
+    # ============ Step 8: Generate Short Code ============
+    
+    # Generate and register user-friendly short code
+    short_code = alias_service.register_short_code(did)
+    
     return RegistrationResponse(
         success=True,
         did=did,
+        short_code=short_code,
         user_id=user_id,
         ipfs_cid=ipfs_cid,
         ipfs_gateway_url=upload_result.gateway_url,
         identity_hash=identity_hash_hex,
         tx_hash=tx_hash,
         data_reduction=data_reduction,
-        message="Registration successful - identity stored on IPFS and anchored on blockchain"
+        message=f"Registration successful! Your short code: {short_code}"
     )
 
 

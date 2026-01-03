@@ -65,7 +65,7 @@ function VerifyPage() {
         e.preventDefault()
 
         const newErrors = {
-            did: !did ? 'DID is required' : null,
+            did: !did ? 'Short code or DID is required' : null,
             face: validateFile(files.face, 'image', true),
             voice: validateFile(files.voice, 'audio', true),
             idDoc: validateFile(files.idDoc, 'image', false)
@@ -146,18 +146,23 @@ function VerifyPage() {
             <div className="card">
                 <form onSubmit={handleSubmit}>
                     <div className="form-group">
-                        <label className="form-label" htmlFor="did">Decentralized Identifier (DID)</label>
+                        <label className="form-label" htmlFor="did">Identity Code or DID</label>
                         <input
                             id="did"
                             type="text"
                             className="form-input"
-                            placeholder="did:eth:sepolia:user_..."
+                            placeholder="Enter short code (e.g., MZXW6YTB) or full DID"
                             value={did}
                             onChange={(e) => setDid(e.target.value)}
                             disabled={verifying}
+                            style={{ 
+                                textTransform: did.startsWith('did:') ? 'none' : 'uppercase',
+                                fontFamily: 'var(--font-mono)',
+                                letterSpacing: '0.1rem'
+                            }}
                         />
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                            The DID will be used to fetch the IPFS CID from the blockchain
+                            Enter your <strong>8-character short code</strong>, custom alias, or full DID
                         </div>
                         {errors.did && <p className="status status-error" style={{ marginTop: '0.5rem', padding: '0.5rem' }}>{errors.did}</p>}
                     </div>

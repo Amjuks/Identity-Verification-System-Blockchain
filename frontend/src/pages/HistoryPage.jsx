@@ -10,7 +10,7 @@ function HistoryPage() {
         e.preventDefault()
 
         if (!did.trim()) {
-            setError('DID is required')
+            setError('Short code or DID is required')
             return
         }
 
@@ -75,15 +75,21 @@ function HistoryPage() {
             </div>
 
             <div className="card" style={{ marginBottom: '2rem' }}>
-                <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '1rem' }}>
+                <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                     <input
                         type="text"
                         className="form-input"
-                        placeholder="Enter DID to lookup..."
+                        placeholder="Enter short code (e.g., MZXW6YTB) or full DID..."
                         value={did}
                         onChange={(e) => setDid(e.target.value)}
                         disabled={loading}
-                        style={{ flex: 1 }}
+                        style={{ 
+                            flex: 1, 
+                            minWidth: '200px',
+                            textTransform: did.startsWith('did:') ? 'none' : 'uppercase',
+                            fontFamily: 'var(--font-mono)',
+                            letterSpacing: '0.05rem'
+                        }}
                     />
                     <button
                         type="submit"
@@ -93,6 +99,9 @@ function HistoryPage() {
                         {loading ? <span className="loader"></span> : '🔍 Query Blockchain'}
                     </button>
                 </form>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                    Enter your <strong>8-character short code</strong>, custom alias, or full DID
+                </div>
             </div>
 
             {error && (
