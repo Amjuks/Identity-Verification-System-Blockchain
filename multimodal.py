@@ -20,13 +20,9 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 # ================== FACE MODULE (MediaPipe) ==================
 
 class FaceModule:
-    """
-    Face embedding using DeepFace.
-    Produces a deterministic face embedding suitable for verification.
-    """
     def __init__(
         self,
-        model_name: str = "ArcFace",
+        model_name: str = "Facenet512",
         detector_backend: str = "retinaface"
     ):
         self.model_name = model_name
