@@ -367,23 +367,34 @@ async def verify_identity(
         # Compare extracted text with stored text
         doc_text_score = text_similarity(live_doc_text, stored_doc_text)
         
-        # Compare face in live document with stored face
+        # Compare face in live document with stored face embedding (registered face)
         if live_doc_embedding is not None:
             # Extract face portion from document embedding (first 512 dims)
             live_doc_face = live_doc_embedding[:512] if len(live_doc_embedding) >= 512 else live_doc_embedding
             
-            # Compare with stored face embedding for face-to-document match
-            doc_face_score = ml_engine.cosine_similarity(live_face_embedding, live_doc_face)
+            # Normalize dimensions
+            if len(live_doc_face) < 512:
+                live_doc_face = np.pad(live_doc_face, (0, 512 - len(live_doc_face)))
+            
+            # Multi-way comparison for better accuracy:
+            # 1. Live face vs Document face (is this person holding their own ID?)
+            live_vs_doc = ml_engine.cosine_similarity(live_face_embedding, live_doc_face)
+            
+            # 2. Stored face vs Document face (does the ID match registration?)
+            stored_vs_doc = ml_engine.cosine_similarity(stored_face_embedding, live_doc_face)
+            
+            # Use the average of both comparisons for robustness
+            doc_face_score = 0.5 * live_vs_doc + 0.5 * stored_vs_doc
             doc_face_score = max(0.0, min(1.0, doc_face_score))
         
         # Combined document score: 50% text match + 50% face match
         doc_score = 0.5 * doc_text_score + 0.5 * doc_face_score
     else:
         # No live document provided - use stored document face against live face
-        # Document embedding: first 512 dims are face (ArcFace), next 128 are text
+        # Document embedding: first 512 dims are face (FaceNet), next 128 are text
         doc_face_portion = stored_doc_embedding[:512]
         
-        # Pad if necessary
+        # Normalize dimensions
         if len(doc_face_portion) < 512:
             doc_face_portion = np.pad(doc_face_portion, (0, 512 - len(doc_face_portion)))
         
@@ -391,6 +402,7 @@ async def verify_identity(
         if len(live_face_normalized) < 512:
             live_face_normalized = np.pad(live_face_normalized, (0, 512 - len(live_face_normalized)))
         
+        # Compare live face with the face from registered ID document
         doc_face_score = ml_engine.cosine_similarity(live_face_normalized, doc_face_portion)
         doc_face_score = max(0.0, min(1.0, doc_face_score))
         

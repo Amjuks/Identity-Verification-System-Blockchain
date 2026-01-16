@@ -5,8 +5,7 @@ Uses FaceNet (InceptionResnetV1) for face recognition and SpeechBrain ECAPA-TDNN
 """
 
 import os
-# Fix for Windows symlink privilege issue with SpeechBrain
-# Must be set BEFORE speechbrain is imported anywhere
+
 os.environ['SPEECHBRAIN_LOCAL_STRATEGY'] = 'copy'
 
 import io
@@ -51,7 +50,7 @@ class FaceProcessor:
                 self._device = torch.device('cuda' if cuda_available else 'cpu')
                 
                 # Initialize MTCNN for face detection
-                # Returns face tensors ready for the recognition model
+                
                 self.mtcnn = MTCNN(
                     image_size=160,
                     margin=20,
@@ -60,17 +59,17 @@ class FaceProcessor:
                     factor=0.709,
                     post_process=True,
                     device=self._device,
-                    keep_all=False  # Only keep the largest face
+                    keep_all=False  
                 )
                 
-                # Initialize InceptionResnetV1 for face embedding
+                
                 self.resnet = InceptionResnetV1(
                     pretrained='vggface2',
                     classify=False,
                     device=self._device
                 ).eval()
                 
-                # Ensure model is on correct device
+                
                 self.resnet = self.resnet.to(self._device)
                 
                 self._initialized = True
@@ -79,7 +78,7 @@ class FaceProcessor:
                 print(f"Failed to initialize FaceNet: {e}")
                 import traceback
                 traceback.print_exc()
-                self._initialized = True  # Don't retry on failure
+                self._initialized = True  
         return self.mtcnn, self.resnet
     
     def preprocess_image(self, image: np.ndarray) -> np.ndarray:
@@ -91,21 +90,21 @@ class FaceProcessor:
         if image is None:
             return None
         
-        # Ensure image is in RGB format (MTCNN expects RGB)
+        
         if len(image.shape) == 2:
-            # Grayscale to RGB
+            
             image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
         elif image.shape[2] == 4:
-            # RGBA to RGB
+            
             image = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
         elif image.shape[2] == 3:
-            # BGR to RGB (OpenCV loads as BGR)
+            
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
-        # Get dimensions
+        
         h, w = image.shape[:2]
         
-        # Resize if image is too small (face detection needs reasonable size)
+        
         min_size = 160
         if h < min_size or w < min_size:
             scale = max(min_size / h, min_size / w)
@@ -130,7 +129,7 @@ class FaceProcessor:
             import torch
             from PIL import Image
             
-            # Decode image
+            
             nparr = np.frombuffer(image_bytes, np.uint8)
             image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             
@@ -140,42 +139,42 @@ class FaceProcessor:
             
             print(f"Original image size: {image.shape}")
             
-            # Preprocess for better detection
+            
             image = self.preprocess_image(image)
             
             if image is None:
                 print("Image preprocessing failed")
                 return None
             
-            # Get models
+            
             mtcnn, resnet = self._get_models()
             if mtcnn is None or resnet is None:
                 print("FaceNet models not initialized")
                 return None
             
-            # Convert to PIL Image (MTCNN expects PIL Image or numpy array)
+            
             pil_image = Image.fromarray(image)
             
-            # Detect face and get aligned face tensor
+            
             face_tensor = mtcnn(pil_image)
             
             if face_tensor is None:
                 print(f"No face detected in image (size: {image.shape})")
                 return None
             
-            # Ensure tensor is on correct device and has batch dimension
+            
             if face_tensor.dim() == 3:
                 face_tensor = face_tensor.unsqueeze(0)
             face_tensor = face_tensor.to(self._device)
             
-            # Get embedding
+            
             with torch.no_grad():
                 embedding = resnet(face_tensor)
                 embedding = embedding.squeeze().cpu().numpy()
             
             print(f"Face detected! Embedding shape: {embedding.shape}")
             
-            # Ensure it's float32 and normalized
+            
             embedding = embedding.astype(np.float32)
             embedding = embedding / (np.linalg.norm(embedding) + 1e-8)
             
@@ -205,11 +204,11 @@ class VoiceProcessor:
         """Lazy initialization of SpeechBrain speaker encoder."""
         if not self._initialized:
             try:
-                # Check torchaudio compatibility first
+                
                 import torch
                 import torchaudio
                 
-                # Try to check available backends (handle API changes)
+                
                 try:
                     if hasattr(torchaudio, 'list_audio_backends'):
                         backends = torchaudio.list_audio_backends()
@@ -218,11 +217,11 @@ class VoiceProcessor:
                     pass
                 
                 from speechbrain.inference import EncoderClassifier
-                # Import LocalStrategy for Windows symlink fix
+                
                 from speechbrain.utils.fetching import LocalStrategy
                 
-                # Use ECAPA-TDNN model for speaker embedding
-                # Use COPY strategy to avoid Windows symlink privilege issues
+                
+                
                 self.encoder = EncoderClassifier.from_hparams(
                     source="speechbrain/spkrec-ecapa-voxceleb",
                     savedir="data/speechbrain_models/spkrec-ecapa-voxceleb",
@@ -232,7 +231,7 @@ class VoiceProcessor:
                 self._initialized = True
                 print(f"SpeechBrain ECAPA-TDNN model loaded (device: {'cuda' if torch.cuda.is_available() else 'cpu'})")
             except ImportError as e:
-                # Try alternative import path
+                
                 try:
                     import torch
                     from speechbrain.pretrained import EncoderClassifier
@@ -275,7 +274,7 @@ class VoiceProcessor:
             192-D float32 embedding or None on error
         """
         try:
-            # Load audio using librosa (handles various formats)
+            
             audio_io = io.BytesIO(audio_bytes)
             y, sr = librosa.load(audio_io, sr=self.sample_rate)
             
@@ -283,43 +282,43 @@ class VoiceProcessor:
                 print("Empty audio")
                 return None
             
-            # ============ Enhanced Preprocessing ============
             
-            # 1. Normalize audio to consistent volume level
+            
+            
             max_val = np.max(np.abs(y))
             if max_val > 0:
-                y = y / max_val * 0.95  # Normalize to 95% of max
+                y = y / max_val * 0.95  
             
-            # 2. Remove DC offset
+            
             y = y - np.mean(y)
             
-            # 3. Trim silence from beginning and end (voice activity detection)
-            # Use energy-based trimming
+            
+            
             y_trimmed, _ = librosa.effects.trim(y, top_db=25)
             
-            # Only use trimmed if it preserves reasonable amount of audio
-            if len(y_trimmed) > self.sample_rate * 0.5:  # At least 0.5 second
+            
+            if len(y_trimmed) > self.sample_rate * 0.5:  
                 y = y_trimmed
                 print(f"Audio trimmed: {len(y)/self.sample_rate:.2f}s of speech detected")
             
-            # 4. Apply pre-emphasis filter to boost high frequencies (clearer speech)
+            
             pre_emphasis = 0.97
             y = np.append(y[0], y[1:] - pre_emphasis * y[:-1])
             
-            # 5. Minimum 3 seconds for reliable speaker embedding
+            
             min_duration = 3 * self.sample_rate
             if len(y) < min_duration:
-                # Repeat audio to reach minimum duration (better than padding with silence)
+                
                 repeats = int(np.ceil(min_duration / len(y)))
                 y = np.tile(y, repeats)[:min_duration]
                 print(f"Audio repeated to reach {min_duration/self.sample_rate:.1f}s minimum")
             
-            # Re-normalize after preprocessing
+            
             max_val = np.max(np.abs(y))
             if max_val > 0:
                 y = y / max_val * 0.95
             
-            # Get encoder
+            
             encoder = self._get_encoder()
             
             if encoder is None or self._use_fallback:
@@ -328,20 +327,20 @@ class VoiceProcessor:
             
             import torch
             
-            # Move tensor to same device as model
+            
             device = next(encoder.mods.parameters()).device
             
-            # Convert to tensor (SpeechBrain expects [batch, time])
+            
             audio_tensor = torch.tensor(y).unsqueeze(0).float().to(device)
             
-            # Get embedding
+            
             with torch.no_grad():
                 embedding = encoder.encode_batch(audio_tensor)
                 embedding = embedding.squeeze().cpu().numpy()
             
             print(f"Voice embedding extracted, shape: {embedding.shape}")
             
-            # Ensure it's float32 and normalized
+            
             embedding = embedding.astype(np.float32)
             embedding = embedding / (np.linalg.norm(embedding) + 1e-8)
             
@@ -351,7 +350,7 @@ class VoiceProcessor:
             print(f"Voice processing error: {e}")
             import traceback
             traceback.print_exc()
-            # Fallback to MFCC
+            
             try:
                 audio_io = io.BytesIO(audio_bytes)
                 y, sr = librosa.load(audio_io, sr=self.sample_rate)
@@ -362,25 +361,25 @@ class VoiceProcessor:
     def _fallback_mfcc(self, y: np.ndarray, sr: int) -> Optional[np.ndarray]:
         """Fallback MFCC embedding if SpeechBrain fails."""
         try:
-            # Extract MFCCs
+            
             mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=40)
             
-            # Compute statistics
+            
             mfcc_mean = np.mean(mfccs, axis=1)
             mfcc_std = np.std(mfccs, axis=1)
             mfcc_delta = np.mean(librosa.feature.delta(mfccs), axis=1)
             mfcc_delta2 = np.mean(librosa.feature.delta(mfccs, order=2), axis=1)
             
-            # Concatenate features (40*4 = 160, pad to 192)
+            
             embedding = np.concatenate([mfcc_mean, mfcc_std, mfcc_delta, mfcc_delta2])
             
-            # Pad to 192 dimensions to match ECAPA-TDNN
+            
             if len(embedding) < 192:
                 embedding = np.pad(embedding, (0, 192 - len(embedding)))
             else:
                 embedding = embedding[:192]
             
-            # L2 normalize
+            
             embedding = embedding / (np.linalg.norm(embedding) + 1e-8)
             
             return embedding.astype(np.float32)
@@ -398,29 +397,29 @@ class DocumentProcessor:
     def __init__(self, output_dim: int = 512):
         self.output_dim = output_dim
         
-        # Initialize EasyOCR reader with GPU support if available
+        
         import torch
         self.reader = easyocr.Reader(['en'], gpu=torch.cuda.is_available())
         
-        # Initialize face processor for document face detection
+        
         self.face_processor = FaceProcessor()
         
-        # Text embedding dimension
+        
         self.text_dim = 128
     
     def extract_text(self, image_bytes: bytes) -> str:
         """Extract text from document using OCR."""
-        # Decode image
+        
         nparr = np.frombuffer(image_bytes, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
         if image is None:
             return ""
         
-        # Run OCR
+        
         results = self.reader.readtext(image)
         
-        # Combine all detected text
+        
         text_parts = [result[1] for result in results]
         return " ".join(text_parts)
     
@@ -431,9 +430,9 @@ class DocumentProcessor:
         if not text:
             return np.zeros(self.text_dim, dtype=np.float32)
         
-        # Character frequency features
+        
         text_lower = text.lower()
-        char_freq = np.zeros(26 + 10, dtype=np.float32)  # a-z + 0-9
+        char_freq = np.zeros(26 + 10, dtype=np.float32)  
         
         for char in text_lower:
             if 'a' <= char <= 'z':
@@ -441,19 +440,161 @@ class DocumentProcessor:
             elif '0' <= char <= '9':
                 char_freq[26 + int(char)] += 1
         
-        # Normalize
+        
         if char_freq.sum() > 0:
             char_freq = char_freq / char_freq.sum()
         
-        # Expand to text_dim using projection
+        
         np.random.seed(43)
         projection = np.random.randn(36, self.text_dim).astype(np.float32)
         embedding = np.dot(char_freq, projection)
         
-        # L2 normalize
+        
         embedding = embedding / (np.linalg.norm(embedding) + 1e-8)
         
         return embedding.astype(np.float32)
+    
+    def preprocess_document_image(self, image: np.ndarray) -> np.ndarray:
+        """
+        Enhanced preprocessing specifically for ID document photos.
+        Improves face detection accuracy on passport/ID photos.
+        """
+        if image is None:
+            return None
+        
+        # Convert to RGB if needed
+        if len(image.shape) == 2:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+        elif image.shape[2] == 4:
+            image = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
+        elif image.shape[2] == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        # Resize to reasonable dimensions for better face detection
+        h, w = image.shape[:2]
+        target_size = 800
+        if max(h, w) > target_size:
+            scale = target_size / max(h, w)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+            image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+        elif min(h, w) < 200:
+            scale = 200 / min(h, w)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+            image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+        
+        # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        # This helps with varied lighting in ID photos
+        lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        lab[:, :, 0] = clahe.apply(lab[:, :, 0])
+        image = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+        
+        # Light sharpening to improve face detection
+        kernel = np.array([[-0.5, -0.5, -0.5],
+                          [-0.5,  5.0, -0.5],
+                          [-0.5, -0.5, -0.5]])
+        image = cv2.filter2D(image, -1, kernel)
+        image = np.clip(image, 0, 255).astype(np.uint8)
+        
+        return image
+    
+    def extract_face_from_document(self, image_bytes: bytes) -> Optional[np.ndarray]:
+        """
+        Enhanced face extraction from ID documents with multiple attempts.
+        Uses progressively relaxed parameters to find faces in difficult images.
+        """
+        try:
+            import torch
+            from PIL import Image
+            from facenet_pytorch import MTCNN, InceptionResnetV1
+            
+            # Decode image
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            if image is None:
+                print("Failed to decode document image")
+                return None
+            
+            # Apply document-specific preprocessing
+            image = self.preprocess_document_image(image)
+            if image is None:
+                return None
+            
+            print(f"Document image preprocessed: {image.shape}")
+            
+            # Get models
+            mtcnn, resnet = self.face_processor._get_models()
+            if mtcnn is None or resnet is None:
+                return None
+            
+            device = self.face_processor._device
+            pil_image = Image.fromarray(image)
+            
+            # First attempt with standard detection
+            face_tensor = mtcnn(pil_image)
+            
+            # If no face found, try with more lenient settings
+            if face_tensor is None:
+                print("Standard detection failed, trying lenient thresholds...")
+                
+                # Create temporary MTCNN with relaxed thresholds
+                lenient_mtcnn = MTCNN(
+                    image_size=160,
+                    margin=40,  # Larger margin
+                    min_face_size=15,  # Smaller minimum face
+                    thresholds=[0.5, 0.6, 0.6],  # Lower thresholds
+                    factor=0.709,
+                    post_process=True,
+                    device=device,
+                    keep_all=False
+                )
+                face_tensor = lenient_mtcnn(pil_image)
+            
+            # If still no face, try even more relaxed settings
+            if face_tensor is None:
+                print("Lenient detection failed, trying very relaxed thresholds...")
+                
+                very_lenient_mtcnn = MTCNN(
+                    image_size=160,
+                    margin=60,  # Even larger margin
+                    min_face_size=10,  # Very small minimum
+                    thresholds=[0.4, 0.5, 0.5],  # Very low thresholds
+                    factor=0.709,
+                    post_process=True,
+                    device=device,
+                    keep_all=False
+                )
+                face_tensor = very_lenient_mtcnn(pil_image)
+            
+            if face_tensor is None:
+                print("No face detected in document after multiple attempts")
+                return None
+            
+            # Extract embedding
+            if face_tensor.dim() == 3:
+                face_tensor = face_tensor.unsqueeze(0)
+            face_tensor = face_tensor.to(device)
+            
+            with torch.no_grad():
+                embedding = resnet(face_tensor)
+                embedding = embedding.squeeze().cpu().numpy()
+            
+            print(f"Document face detected! Embedding shape: {embedding.shape}")
+            
+            # Normalize
+            embedding = embedding.astype(np.float32)
+            embedding = embedding / (np.linalg.norm(embedding) + 1e-8)
+            
+            return embedding
+            
+        except Exception as e:
+            print(f"Document face extraction error: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def process(self, image_bytes: bytes) -> Tuple[Optional[np.ndarray], str]:
         """
@@ -465,26 +606,26 @@ class DocumentProcessor:
         Returns:
             Tuple of (embedding, extracted text)
         """
-        # Extract text
+        
         text = self.extract_text(image_bytes)
         
-        # Extract face from document using FaceNet
-        face_embedding = self.face_processor.process(image_bytes)
+        # Use enhanced document face extraction
+        face_embedding = self.extract_face_from_document(image_bytes)
         
-        # Create text embedding
+        
         text_embedding = self.text_to_embedding(text)
         
         if face_embedding is not None:
-            # Combine face (512D) and text (128D) embeddings
+            
             combined = np.concatenate([face_embedding, text_embedding])
         else:
-            # Use text only, pad with zeros for face portion
+            
             combined = np.concatenate([
                 np.zeros(512, dtype=np.float32),
                 text_embedding
             ])
         
-        # L2 normalize final embedding
+        
         combined = combined / (np.linalg.norm(combined) + 1e-8)
         
         return combined.astype(np.float32), text
@@ -513,7 +654,7 @@ class MLEngine:
     @staticmethod
     def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
         """Compute cosine similarity between two vectors."""
-        # Handle different embedding sizes
+        
         if len(a) != len(b):
             min_len = min(len(a), len(b))
             a = a[:min_len]
