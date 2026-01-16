@@ -210,7 +210,7 @@ VERIFICATION_THRESHOLD=0.75  # 75% minimum for successful verification
 ## 📁 Project Structure
 
 ```
-DID_Ishaan_Abhiram/
+De-centralised_Identity/
 ├── app/
 │   ├── __init__.py
 │   ├── config.py           # Configuration management
@@ -235,7 +235,7 @@ DID_Ishaan_Abhiram/
 │       │   ├── VerifyPage.jsx
 │       │   └── HistoryPage.jsx
 │       └── components/
-├── .env.example
+├── .env
 ├── requirements.txt
 └── README.md
 ```
